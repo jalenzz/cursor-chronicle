@@ -17,7 +17,9 @@ from cursor_chronicle.utils import (
 )
 
 # Handle broken pipe gracefully
-signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+# Handle broken pipe gracefully (SIGPIPE is Unix-only)
+if hasattr(signal, "SIGPIPE"):
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 
 class CursorHistorySearch:

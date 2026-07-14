@@ -520,6 +520,126 @@ class TestGetProjectsGlobalComposerHeaders(unittest.TestCase):
         conn.close()
         return db_path
 
+    def _make_global_db_with_table(self, tmpdir: Path, composers: list) -> Path:
+        """Create a temp state.vscdb with the composerHeaders table (July 2026+)."""
+        db_path = tmpdir / "state.vscdb"
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute(
+            """CREATE TABLE composerHeaders (
+                composerId TEXT PRIMARY KEY,
+                workspaceId TEXT,
+                createdAt INTEGER,
+                lastUpdatedAt INTEGER,
+                isArchived INTEGER,
+                isSubagent INTEGER,
+                recency INTEGER,
+                checkpointAt INTEGER,
+                value TEXT
+            )"""
+        )
+        for comp in composers:
+            cur.execute(
+                """INSERT INTO composerHeaders
+                   (composerId, workspaceId, createdAt, lastUpdatedAt,
+                    isArchived, isSubagent, recency, checkpointAt, value)
+                   VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?)""",
+                (
+                    comp["composerId"],
+                    (comp.get("workspaceIdentifier") or {}).get("id", ""),
+                    comp.get("createdAt", 0),
+                    comp.get("lastUpdatedAt", 0),
+                    json.dumps(comp),
+                ),
+            )
+        conn.commit()
+        conn.close()
+        return db_path
+
+    def test_composer_headers_table_returns_projects(self):
+        """composerHeaders table (July 2026+) is preferred over ItemTable."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            composers = [
+                {
+                    "composerId": "aaa",
+                    "name": "Fix auth bug",
+                    "lastUpdatedAt": 1710000000000,
+                    "createdAt": 1709900000000,
+                    "workspaceIdentifier": {
+                        "id": "ws1",
+                        "uri": {"fsPath": "/home/user/myapp", "scheme": "file"},
+                    },
+                },
+            ]
+            db_path = self._make_global_db_with_table(tmp_path, composers)
+
+            viewer = cursor_chronicle.CursorChatViewer()
+            viewer.global_storage_path = db_path
+            viewer.workspace_storage_path = tmp_path / "nonexistent"
+
+            projects = viewer.get_projects()
+            self.assertEqual(len(projects), 1)
+            self.assertEqual(projects[0]["project_name"], "myapp")
+            self.assertEqual(projects[0]["composers"][0]["composerId"], "aaa")
+
+    def test_composer_headers_table_preferred_over_item_table(self):
+        """When both table and ItemTable exist, table data wins."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            table_composers = [
+                {
+                    "composerId": "new-id",
+                    "name": "From table",
+                    "lastUpdatedAt": 1710100000000,
+                    "createdAt": 1710000000000,
+                    "workspaceIdentifier": {
+                        "id": "ws1",
+                        "uri": {"fsPath": "/home/user/new", "scheme": "file"},
+                    },
+                },
+            ]
+            db_path = self._make_global_db_with_table(tmp_path, table_composers)
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("CREATE TABLE ItemTable (key TEXT PRIMARY KEY, value TEXT)")
+            cur.execute(
+                "INSERT INTO ItemTable VALUES (?, ?)",
+                (
+                    "composer.composerHeaders",
+                    json.dumps(
+                        {
+                            "allComposers": [
+                                {
+                                    "composerId": "old-id",
+                                    "name": "From item table",
+                                    "lastUpdatedAt": 1700000000000,
+                                    "createdAt": 1699900000000,
+                                    "workspaceIdentifier": {
+                                        "id": "ws2",
+                                        "uri": {
+                                            "fsPath": "/home/user/old",
+                                            "scheme": "file",
+                                        },
+                                    },
+                                }
+                            ]
+                        }
+                    ),
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            viewer = cursor_chronicle.CursorChatViewer()
+            viewer.global_storage_path = db_path
+            viewer.workspace_storage_path = tmp_path / "nonexistent"
+
+            projects = viewer.get_projects()
+            self.assertEqual(len(projects), 1)
+            self.assertEqual(projects[0]["project_name"], "new")
+            self.assertEqual(projects[0]["composers"][0]["composerId"], "new-id")
+
     def test_global_headers_returns_projects(self):
         """Global composerHeaders are loaded and grouped by folder_path."""
         with tempfile.TemporaryDirectory() as tmp:

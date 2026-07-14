@@ -11,8 +11,9 @@ import urllib.parse
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-# Handle broken pipe gracefully
-signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+# Handle broken pipe gracefully (SIGPIPE is Unix-only)
+if hasattr(signal, "SIGPIPE"):
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
 _CODE_WORKSPACE_SUFFIX = ".code-workspace"
 
@@ -133,23 +134,39 @@ def parse_composer_workspace_identifier(comp: Dict) -> Tuple[str, str]:
 
 
 def load_global_composer_headers(global_storage_path: Path) -> List[Dict]:
-    """
-    Load composer headers from the global ``composer.composerHeaders`` key
-    introduced in Cursor 3.0+ (April 2026).
-
-    Returns an empty list when the key is absent (pre-3.0 installs).
-    """
+    """Load composer headers from global ``state.vscdb``."""
     if not global_storage_path.exists():
         return []
     try:
         with sqlite3.connect(global_storage_path) as conn:
             cur = conn.cursor()
+            try:
+                cur.execute(
+                    "SELECT composerId, createdAt, lastUpdatedAt, value "
+                    "FROM composerHeaders"
+                )
+                headers: List[Dict] = []
+                for composer_id, created_at, last_updated_at, value in cur.fetchall():
+                    if not value:
+                        continue
+                    comp = json.loads(value)
+                    comp.setdefault("composerId", composer_id)
+                    comp["createdAt"] = comp.get("createdAt") or created_at or 0
+                    comp["lastUpdatedAt"] = (
+                        comp.get("lastUpdatedAt") or last_updated_at or 0
+                    )
+                    headers.append(comp)
+                if headers:
+                    return headers
+            except sqlite3.OperationalError:
+                pass
+
             cur.execute(
                 "SELECT value FROM ItemTable WHERE key = 'composer.composerHeaders'"
             )
-            result = cur.fetchone()
-            if result:
-                return json.loads(result[0]).get("allComposers", [])
+            row = cur.fetchone()
+            if row:
+                return json.loads(row[0]).get("allComposers", [])
     except Exception:
         pass
     return []
