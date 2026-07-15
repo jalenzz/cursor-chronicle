@@ -583,6 +583,75 @@ class TestGetProjectsGlobalComposerHeaders(unittest.TestCase):
             self.assertEqual(projects[0]["project_name"], "myapp")
             self.assertEqual(projects[0]["composers"][0]["composerId"], "aaa")
 
+    def test_composer_headers_table_skips_invalid_rows(self):
+        """Malformed or non-object rows are skipped; valid rows are still returned."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            valid = {
+                "composerId": "good-id",
+                "name": "Valid Chat",
+                "lastUpdatedAt": 1710000000000,
+                "createdAt": 1709900000000,
+                "workspaceIdentifier": {
+                    "id": "ws1",
+                    "uri": {"fsPath": "/home/user/good", "scheme": "file"},
+                },
+            }
+            db_path = tmp_path / "state.vscdb"
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute(
+                """CREATE TABLE composerHeaders (
+                    composerId TEXT PRIMARY KEY,
+                    workspaceId TEXT,
+                    createdAt INTEGER,
+                    lastUpdatedAt INTEGER,
+                    isArchived INTEGER,
+                    isSubagent INTEGER,
+                    recency INTEGER,
+                    checkpointAt INTEGER,
+                    value TEXT
+                )"""
+            )
+            cur.execute(
+                """INSERT INTO composerHeaders
+                   (composerId, workspaceId, createdAt, lastUpdatedAt,
+                    isArchived, isSubagent, recency, checkpointAt, value)
+                   VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?)""",
+                ("bad-json", "ws1", 0, 0, "not valid json{{{"),
+            )
+            cur.execute(
+                """INSERT INTO composerHeaders
+                   (composerId, workspaceId, createdAt, lastUpdatedAt,
+                    isArchived, isSubagent, recency, checkpointAt, value)
+                   VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?)""",
+                ("null-value", "ws1", 0, 0, "null"),
+            )
+            cur.execute(
+                """INSERT INTO composerHeaders
+                   (composerId, workspaceId, createdAt, lastUpdatedAt,
+                    isArchived, isSubagent, recency, checkpointAt, value)
+                   VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?)""",
+                (
+                    valid["composerId"],
+                    (valid.get("workspaceIdentifier") or {}).get("id", ""),
+                    valid.get("createdAt", 0),
+                    valid.get("lastUpdatedAt", 0),
+                    json.dumps(valid),
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            viewer = cursor_chronicle.CursorChatViewer()
+            viewer.global_storage_path = db_path
+            viewer.workspace_storage_path = tmp_path / "nonexistent"
+
+            projects = viewer.get_projects()
+            self.assertEqual(len(projects), 1)
+            self.assertEqual(projects[0]["project_name"], "good")
+            self.assertEqual(projects[0]["composers"][0]["composerId"], "good-id")
+
     def test_composer_headers_table_preferred_over_item_table(self):
         """When both table and ItemTable exist, table data wins."""
         with tempfile.TemporaryDirectory() as tmp:

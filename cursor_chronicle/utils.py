@@ -147,15 +147,20 @@ def load_global_composer_headers(global_storage_path: Path) -> List[Dict]:
                 )
                 headers: List[Dict] = []
                 for composer_id, created_at, last_updated_at, value in cur.fetchall():
-                    if not value:
+                    try:
+                        if not value:
+                            continue
+                        comp = json.loads(value)
+                        if not isinstance(comp, dict):
+                            continue
+                        comp.setdefault("composerId", composer_id)
+                        comp["createdAt"] = comp.get("createdAt") or created_at or 0
+                        comp["lastUpdatedAt"] = (
+                            comp.get("lastUpdatedAt") or last_updated_at or 0
+                        )
+                        headers.append(comp)
+                    except (json.JSONDecodeError, TypeError, AttributeError):
                         continue
-                    comp = json.loads(value)
-                    comp.setdefault("composerId", composer_id)
-                    comp["createdAt"] = comp.get("createdAt") or created_at or 0
-                    comp["lastUpdatedAt"] = (
-                        comp.get("lastUpdatedAt") or last_updated_at or 0
-                    )
-                    headers.append(comp)
                 if headers:
                     return headers
             except sqlite3.OperationalError:
