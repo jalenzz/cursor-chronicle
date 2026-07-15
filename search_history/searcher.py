@@ -16,7 +16,6 @@ from cursor_chronicle.utils import (
     parse_workspace_storage_meta,
 )
 
-# Handle broken pipe gracefully
 # Handle broken pipe gracefully (SIGPIPE is Unix-only)
 if hasattr(signal, "SIGPIPE"):
     signal.signal(signal.SIGPIPE, signal.SIG_DFL)

@@ -652,6 +652,122 @@ class TestGetProjectsGlobalComposerHeaders(unittest.TestCase):
             self.assertEqual(projects[0]["project_name"], "good")
             self.assertEqual(projects[0]["composers"][0]["composerId"], "good-id")
 
+    def test_composer_headers_table_skips_invalid_utf8_blob(self):
+        """Invalid UTF-8 BLOB rows are skipped; valid rows are still returned."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            valid = {
+                "composerId": "good-id",
+                "name": "Valid Chat",
+                "lastUpdatedAt": 1710000000000,
+                "createdAt": 1709900000000,
+                "workspaceIdentifier": {
+                    "id": "ws1",
+                    "uri": {"fsPath": "/home/user/good", "scheme": "file"},
+                },
+            }
+            db_path = tmp_path / "state.vscdb"
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute(
+                """CREATE TABLE composerHeaders (
+                    composerId TEXT PRIMARY KEY,
+                    workspaceId TEXT,
+                    createdAt INTEGER,
+                    lastUpdatedAt INTEGER,
+                    isArchived INTEGER,
+                    isSubagent INTEGER,
+                    recency INTEGER,
+                    checkpointAt INTEGER,
+                    value TEXT
+                )"""
+            )
+            cur.execute(
+                """INSERT INTO composerHeaders
+                   (composerId, workspaceId, createdAt, lastUpdatedAt,
+                    isArchived, isSubagent, recency, checkpointAt, value)
+                   VALUES (?, ?, ?, ?, 0, 0, 0, 0, CAST(X'80' AS BLOB))""",
+                ("bad-utf8", "ws1", 0, 0),
+            )
+            cur.execute(
+                """INSERT INTO composerHeaders
+                   (composerId, workspaceId, createdAt, lastUpdatedAt,
+                    isArchived, isSubagent, recency, checkpointAt, value)
+                   VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?)""",
+                (
+                    valid["composerId"],
+                    (valid.get("workspaceIdentifier") or {}).get("id", ""),
+                    valid.get("createdAt", 0),
+                    valid.get("lastUpdatedAt", 0),
+                    json.dumps(valid),
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            from cursor_chronicle.utils import load_global_composer_headers
+
+            headers = load_global_composer_headers(db_path)
+            self.assertEqual(len(headers), 1)
+            self.assertEqual(headers[0]["composerId"], "good-id")
+
+    def test_composer_headers_table_uses_row_level_composer_id(self):
+        """Null or empty JSON composerId falls back to the row-level ID."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            db_path = tmp_path / "state.vscdb"
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute(
+                """CREATE TABLE composerHeaders (
+                    composerId TEXT PRIMARY KEY,
+                    workspaceId TEXT,
+                    createdAt INTEGER,
+                    lastUpdatedAt INTEGER,
+                    isArchived INTEGER,
+                    isSubagent INTEGER,
+                    recency INTEGER,
+                    checkpointAt INTEGER,
+                    value TEXT
+                )"""
+            )
+            null_id_comp = {
+                "composerId": None,
+                "name": "Null ID Chat",
+                "lastUpdatedAt": 1710000000000,
+                "createdAt": 1709900000000,
+            }
+            empty_id_comp = {
+                "composerId": "",
+                "name": "Empty ID Chat",
+                "lastUpdatedAt": 1710100000000,
+                "createdAt": 1710000000000,
+            }
+            cur.execute(
+                """INSERT INTO composerHeaders
+                   (composerId, workspaceId, createdAt, lastUpdatedAt,
+                    isArchived, isSubagent, recency, checkpointAt, value)
+                   VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?)""",
+                ("row-null-id", "ws1", 0, 0, json.dumps(null_id_comp)),
+            )
+            cur.execute(
+                """INSERT INTO composerHeaders
+                   (composerId, workspaceId, createdAt, lastUpdatedAt,
+                    isArchived, isSubagent, recency, checkpointAt, value)
+                   VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?)""",
+                ("row-empty-id", "ws1", 0, 0, json.dumps(empty_id_comp)),
+            )
+            conn.commit()
+            conn.close()
+
+            from cursor_chronicle.utils import load_global_composer_headers
+
+            headers = load_global_composer_headers(db_path)
+            by_id = {h["composerId"]: h for h in headers}
+            self.assertEqual(len(headers), 2)
+            self.assertEqual(by_id["row-null-id"]["name"], "Null ID Chat")
+            self.assertEqual(by_id["row-empty-id"]["name"], "Empty ID Chat")
+
     def test_composer_headers_table_preferred_over_item_table(self):
         """When both table and ItemTable exist, table data wins."""
         with tempfile.TemporaryDirectory() as tmp:

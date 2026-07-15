@@ -153,13 +153,19 @@ def load_global_composer_headers(global_storage_path: Path) -> List[Dict]:
                         comp = json.loads(value)
                         if not isinstance(comp, dict):
                             continue
-                        comp.setdefault("composerId", composer_id)
+                        if not comp.get("composerId"):
+                            comp["composerId"] = composer_id
                         comp["createdAt"] = comp.get("createdAt") or created_at or 0
                         comp["lastUpdatedAt"] = (
                             comp.get("lastUpdatedAt") or last_updated_at or 0
                         )
                         headers.append(comp)
-                    except (json.JSONDecodeError, TypeError, AttributeError):
+                    except (
+                        json.JSONDecodeError,
+                        TypeError,
+                        AttributeError,
+                        UnicodeDecodeError,
+                    ):
                         continue
                 if headers:
                     return headers
