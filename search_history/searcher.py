@@ -35,7 +35,8 @@ class CursorHistorySearch:
         """Get all composers from all workspaces with project info.
 
         Reads from two sources and merges, deduplicating by composerId:
-        1. Global ``composer.composerHeaders`` (Cursor 3.0+, April 2026).
+        1. Global ``composerHeaders`` table, with the legacy
+           ``ItemTable`` key ``composer.composerHeaders`` as a fallback.
         2. Per-workspace ``composer.composerData`` (legacy, pre-3.0).
         """
         composers = []

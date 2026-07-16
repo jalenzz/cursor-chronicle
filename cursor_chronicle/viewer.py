@@ -67,7 +67,8 @@ class CursorChatViewer:
         """Get list of all projects with their metadata.
 
         Reads from two sources and merges, deduplicating by composerId:
-        1. Global ``composer.composerHeaders`` (Cursor 3.0+, April 2026).
+        1. Global ``composerHeaders`` table, with the legacy
+           ``ItemTable`` key ``composer.composerHeaders`` as a fallback.
         2. Per-workspace ``composer.composerData`` (legacy, pre-3.0).
         """
         by_project: Dict[str, Dict] = {}
